@@ -24,13 +24,41 @@ typedef int bool;
 #include	<inttypes.h>
 #include 	<time.h>
 #include 	<dirent.h>
+#include 	<sys/types.h>
+#include 	<sys/stat.h>
+#include 	<unistd.h>
+#include 	<errno.h>
+#include	<pwd.h>
+
+
 
 char *progname;
 char buf[BUF_LEN];
 
+struct header {
+    uint32_t len;
+    unsigned char type;
+    char name[100];
+};
+
+struct Entry
+{
+	int ts;
+	char fileName[100];
+	char requestType[100];
+	long fileSize;
+	int sock;
+} requests[1000] ;
+
 void usage();
 int setup_client();
 int setup_server();
+// struct header *getFileMeta(const char *path);
+int getFileSize(const char *filename);
+int comparator(const void *p, const void *q);
+const char *getUserName();
+
+
 
 int s, sock, ch, server, done, bytes, aflg;
 int soctype = SOCK_STREAM;
@@ -41,32 +69,21 @@ char *host = NULL;
 char *log_file = NULL;
 char *port = NULL;
 char *directory = NULL;
+char cwd[1024];
 char *sched = NULL;
 char buff[100];
 bool isDebug;
 pthread_mutex_t access_lock;
+char *username;
 
 
 extern char *optarg;
 extern int optind;
 
-struct header {
-    uint32_t len;
-    unsigned char type;
-    char name[16];
-};
-
-struct entry
-{
-	int ts;
-	char fileName[100];
-	long fileSize;
-	int sock;
-} requests[1000] ;
-
 int
 main(int argc,char *argv[])
 {
+	username = getUserName();
 	fd_set ready;
 
 	// default initializations
@@ -81,6 +98,7 @@ main(int argc,char *argv[])
 	pthread_mutex_init ( &access_lock, NULL);
 
 
+	struct header *fil;
 	struct dirent *ent;
 
 	struct sockaddr_in msgfrom;
@@ -112,6 +130,9 @@ main(int argc,char *argv[])
 				break;
 			case 'r':
 				directory = optarg;
+				if(strcmp(directory, "~") == 0){
+					sprintf(directory, "/home/%s/myhttpd", username);
+				}
 				break;
 			case 't':
 				sleepTime = atoi(optarg);
@@ -136,8 +157,13 @@ main(int argc,char *argv[])
 	{
 	    /* Directory exists. */
 	    chdir(dir);
+	    if (getcwd(cwd, sizeof(cwd)) != NULL)
+       		fprintf(stdout, "Current working dir: %s\n", cwd);
 	    while ((ent = readdir (dir)) != NULL) {
-			printf ("%s\n", ent->d_name);
+	    	if(ent->d_name[0] == '.')
+	    		continue;
+	    	// fil = getFileMeta(ent->d_name);
+			printf ("%s \t %d\n", ent->d_name, getFileSize(ent->d_name));
 		}
 		closedir (dir);
 	}
@@ -307,12 +333,67 @@ usage()
 }
 
 
-struct header
-getFileMeta(char* filePath)
+int 
+getFileSize(const char *filename) // path to file
 {
-	struct header hdr;
-	int fd = open(filePath, "r");
+	DIR* dir = opendir(directory);
+	int size = -1;
+	struct stat st_buf;
+	int status;
+	char *fullpath = malloc(strlen(directory) + strlen(filename) + 2);
 
-	read(fd,&hdr,sizeof(hdr));
-	return hdr;
+	if (dir)
+	{
+	    chdir(dir);
+	    sprintf(fullpath, "%s/%s", directory, filename);
+	    // fprintf(stderr, "%s\n", fullpath);
+	    status = stat (fullpath, &st_buf);
+        if (status != 0) {
+            printf ("Error, errno = %s ", strerror(errno));
+            return 1;
+        }
+
+        // Tell us what it is then exit.
+
+        if (S_ISREG (st_buf.st_mode)) {
+            // printf ("%s is a regular file. ", fullpath);
+            FILE *p_file = NULL;
+            p_file = fopen(fullpath, "r");
+            fseek(p_file,0,SEEK_END);
+            size = ftell(p_file);
+            fclose(p_file);
+        }
+        if (S_ISDIR (st_buf.st_mode)) {
+            // printf ("%s is a directory. ", fullpath);
+        }
+	}
+	return size;
+}
+
+int 
+comparator(const void *p, const void *q) 
+{
+    if(strcmp(sched, "SJF") == 0){
+    	int pSize = ((struct Entry *)p)->fileSize;
+    	int qSize = ((struct Entry *)q)->fileSize;
+    	return (pSize - qSize);
+    }
+    else{
+    	int pTime = ((struct Entry *)p)->ts;
+    	int qTime = ((struct Entry *)q)->ts;
+    	return (pTime - qTime);
+    }
+}
+
+const char *
+getUserName()
+{
+  uid_t uid = geteuid();
+  struct passwd *pw = getpwuid(uid);
+  if (pw)
+  {
+    return pw->pw_name;
+  }
+
+  return "";
 }
