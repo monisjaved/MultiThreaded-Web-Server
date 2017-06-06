@@ -53,10 +53,10 @@ struct Entry
 void usage();
 int setup_client();
 int setup_server();
-// struct header *getFileMeta(const char *path);
 int getFileSize(const char *filename);
 int comparator(const void *p, const void *q);
 const char *getUserName();
+bool isFileThere(const char *fname);
 
 
 
@@ -64,7 +64,7 @@ int s, sock, ch, server, done, bytes, aflg;
 int soctype = SOCK_STREAM;
 int sleepTime;
 int threadNum;
-int logFile;
+FILE* logFile;
 char *host = NULL;
 char *log_file = NULL;
 char *port = NULL;
@@ -74,6 +74,7 @@ char *sched = NULL;
 char buff[100];
 bool isDebug;
 pthread_mutex_t access_lock;
+pthread_mutex_t log_lock;
 char *username;
 
 
@@ -94,8 +95,9 @@ main(int argc,char *argv[])
 	isDebug = false;
 
 
-	// initalize lock
+	// initalize locks
 	pthread_mutex_init ( &access_lock, NULL);
+	pthread_mutex_init ( &log_lock, NULL);
 
 
 	struct header *fil;
@@ -170,15 +172,11 @@ main(int argc,char *argv[])
 
 	if(log_file)
 	{
-		logFile = open(log_file, "w+");
+		pthread_mutex_lock(&log_lock);
+		logFile = fopen(log_file, "wb");
+		pthread_mutex_unlock(&log_lock);
 	}
 
-	if (argc != 0)
-		usage();
-	if (!server && (host == NULL || port == NULL))
-		usage();
-	if (server && host != NULL)
-		usage();
 /*
  * Create socket on local host.
  */
@@ -186,10 +184,7 @@ main(int argc,char *argv[])
 		perror("socket");
 		exit(1);
 	}
-	if (!server)
-		sock = setup_client();
-	else
-		sock = setup_server();
+	sock = setup_server();
 /*
  * Set up select(2) on both socket and terminal, anything that comes
  * in on socket goes to terminal, anything that gets typed on terminal
@@ -222,6 +217,13 @@ main(int argc,char *argv[])
 			time_t now = time (0);
 			strftime (buff, 100, "%Y-%m-%d %H:%M:%S.000", localtime (&now));
 			fprintf(stdout, "%s %s", buff, buf);
+			if(logFile != NULL){
+				pthread_mutex_lock(&log_lock);
+				// fprintf(stderr, "%s %d\n", log_file, logFile);
+				fprintf(logFile, "%s %s", buff, buf);
+				fflush(logFile);
+				pthread_mutex_unlock(&log_lock);
+			}
 			// write(fileno(stdout), buf, bytes);
 		}
 	}
@@ -353,10 +355,7 @@ getFileSize(const char *filename) // path to file
             return 1;
         }
 
-        // Tell us what it is then exit.
-
         if (S_ISREG (st_buf.st_mode)) {
-            // printf ("%s is a regular file. ", fullpath);
             FILE *p_file = NULL;
             p_file = fopen(fullpath, "r");
             fseek(p_file,0,SEEK_END);
@@ -364,7 +363,7 @@ getFileSize(const char *filename) // path to file
             fclose(p_file);
         }
         if (S_ISDIR (st_buf.st_mode)) {
-            // printf ("%s is a directory. ", fullpath);
+        	return -2;
         }
 	}
 	return size;
@@ -396,4 +395,14 @@ getUserName()
   }
 
   return "";
+}
+
+bool
+isFileThere(const char *fname)
+{
+	if( access( fname, F_OK ) != -1 ) {
+		return true;
+	} else {
+	    return false;
+	}
 }
