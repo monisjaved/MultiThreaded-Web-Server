@@ -52,7 +52,7 @@ struct Entry
     int sock;
     int status;
 
-} requests[1000], available[1000] ;
+} requests[1000], available;
 
 struct arg_struct {
     int sock;
@@ -67,6 +67,7 @@ int comparator(const void *, const void *);
 const char *getUserName();
 bool isFileThere(const char *fname);
 void *listener(void *);
+void *queuer(void *);
 const char *getTimeString(time_t);
 unsigned long long getTimeStamp();
 const char ** getSplitString(const char *);
@@ -88,7 +89,6 @@ char *sched = NULL;
 char buff[100];
 bool isDebug;
 int requestsCount = 0;
-int availableCount = 0;
 pthread_mutex_t requests_access_lock;
 pthread_mutex_t available_access_lock;
 pthread_mutex_t log_lock;
@@ -125,14 +125,31 @@ main(int argc,char *argv[])
     struct sockaddr_in serv, msgfrom, remote;
     struct servent *se;
 
-    int msgsize, len, newsock;
+    int msgsize, len, newsock, i;
 
     union {
         uint32_t addr;
         char bytes[4];
     } fromaddr;
 
-    pthread_t listener_thread;
+    pthread_t listener_thread, queuer_thread, executor_thread[threadNum];
+    available.status = NULL;
+
+    if(pthread_create( &queuer_thread , NULL ,  queuer , NULL) < 0)
+    {
+        perror("could not create queuer thread");
+        exit(1);
+    }
+
+    fprintf(stderr, "reached\n");
+
+    // for(i = 0; i< threadNum; i++){
+    //     if(pthread_create( &executor_thread , NULL ,  executor , NULL) < 0)
+    //     {
+    //         perror("could not create executor thread");
+    //         exit(1);
+    //     }
+    // }
 
     if ((progname = rindex(argv[0], '/')) == NULL)
         progname = argv[0];
@@ -440,6 +457,31 @@ void
     return 0;
 }
 
+void
+*queuer(void *arguments) {
+    fprintf(stderr, "reached queuer\n");
+    while(true)
+    {
+        pthread_mutex_lock(&requests_access_lock);
+        if(requestsCount > 0)
+            qsort((void*)requests, requestsCount, sizeof(requests[0]), comparator);
+        pthread_mutex_lock(&available_access_lock);
+        if(available.status != NULL)
+        {
+            available = requests[requestsCount-1];
+            requestsCount--;
+        }
+        pthread_mutex_unlock(&available_access_lock);
+        pthread_mutex_unlock(&requests_access_lock);
+        sleep(5);
+        for(int i=0;i<requestsCount;i++){
+            fprintf(stderr, "%d - ", requests[i].fileSize);
+        }
+        fprintf(stderr, "\n");
+    }
+    return 0;
+}
+
 int
 setup_client() {
 
@@ -553,7 +595,7 @@ getFileSize(const char *filename) // path to file
     {
         chdir(dir);
         sprintf(fullpath, "%s/%s", directory, filename);
-        // fprintf(stderr, "%s\n", fullpath);
+        fprintf(stderr, "%s\n", fullpath);
         status = stat (fullpath, &st_buf);
         if (status != 0) {
             printf ("Error, errno = %s ", strerror(errno));
@@ -580,12 +622,12 @@ comparator(const void *p, const void *q)
     if(strcmp(sched, "SJF") == 0){
         int pSize = ((struct Entry *)p)->fileSize;
         int qSize = ((struct Entry *)q)->fileSize;
-        return (pSize - qSize);
+        return (qSize - pSize);
     }
     else{
         int pTime = ((struct Entry *)p)->ts;
         int qTime = ((struct Entry *)q)->ts;
-        return (pTime - qTime);
+        return (qTime - pTime);
     }
 }
 
@@ -615,7 +657,7 @@ isFileThere(const char *fname)
 const char 
 *getTimeString(time_t ts){
     static char timeString[100];
-    strftime (timeString, 100, "%d/%b/%Y:%H:%M:%S -0600", localtime (&ts));
+    strftime (timeString, 100, "%d/%b/%Y:%H:%M:%S -0400", localtime (&ts));
     return timeString;
 }
 
@@ -660,8 +702,8 @@ const char
 
     /* print the result */
 
-    for (i = 0; i < (n_spaces); ++i)
-      printf ("res[%d] = %s\n", i, res[i]);
+    // for (i = 0; i < (n_spaces); ++i)
+    //   printf ("res[%d] = %s\n", i, res[i]);
 
     /* free the memory allocated */
 
