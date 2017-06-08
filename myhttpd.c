@@ -43,12 +43,21 @@ struct header {
 
 struct Entry
 {
-    int ts;
-    char fileName[100];
-    char requestType[100];
+    unsigned long long ts;
+    char *timeString;
+    char *remoteAddress;
+    char *fileName;
+    char *requestType;
     long fileSize;
     int sock;
-} requests[1000] ;
+    int status;
+
+} requests[1000], available[1000] ;
+
+struct arg_struct {
+    int sock;
+    char *remoteAddress;
+};
 
 void usage();
 int setup_client();
@@ -58,6 +67,9 @@ int comparator(const void *, const void *);
 const char *getUserName();
 bool isFileThere(const char *fname);
 void *listener(void *);
+const char *getTimeString(time_t);
+unsigned long long getTimeStamp();
+const char ** getSplitString(const char *);
 
 
 
@@ -75,7 +87,10 @@ char cwd[1024];
 char *sched = NULL;
 char buff[100];
 bool isDebug;
-pthread_mutex_t access_lock;
+int requestsCount = 0;
+int availableCount = 0;
+pthread_mutex_t requests_access_lock;
+pthread_mutex_t available_access_lock;
 pthread_mutex_t log_lock;
 char *username;
 
@@ -95,10 +110,12 @@ main(int argc,char *argv[])
     sleepTime = 60;
     threadNum = 4;
     isDebug = false;
+    directory = ".";
 
 
     // initalize locks
-    pthread_mutex_init ( &access_lock, NULL);
+    pthread_mutex_init ( &requests_access_lock, NULL);
+    pthread_mutex_init ( &available_access_lock, NULL);
     pthread_mutex_init ( &log_lock, NULL);
 
 
@@ -220,12 +237,15 @@ main(int argc,char *argv[])
 
     while ((newsock = accept(s, (struct sockaddr *) &remote, &len)))
     {
-        fprintf(stderr, "Connection recieved from %d.%d.%d.%d\n",
-              remote.sin_addr.s_addr&0xFF,
+        struct arg_struct arguments;
+
+        arguments.sock = newsock;
+        sprintf(arguments.remoteAddress, "%d.%d.%d.%d", remote.sin_addr.s_addr&0xFF,
               (remote.sin_addr.s_addr&0xFF00)>>8,
               (remote.sin_addr.s_addr&0xFF0000)>>16,
               (remote.sin_addr.s_addr&0xFF000000)>>24);
-        if(pthread_create( &listener_thread , NULL ,  listener , (void*) &newsock) < 0)
+
+        if(pthread_create( &listener_thread , NULL ,  listener , (void*) &arguments) < 0)
         {
             perror("could not create thread");
             exit(1);
@@ -289,25 +309,116 @@ main(int argc,char *argv[])
  *      client connecting to a port on a remote machine.
  */
 void 
-*listener(void *socket_desc)
+*listener(void *arguments)
 {
-    int sock = *(int*)socket_desc;
+    struct arg_struct *args = (struct arg_struct *)arguments;
+    int sock = args->sock;
+    char *remoteAddress = args->remoteAddress;
     int readLen;
+    int i;
 
     char clientMessage[BUF_LEN];
+    const char *timeString;
      
     while( (readLen = recv(sock , clientMessage , BUF_LEN , 0)) > 0 )
     {
         //end of string marker
+
         clientMessage[readLen] = '\0';
 
         time_t now = time (0);
-        strftime (buff, 100, "%Y-%m-%d %H:%M:%S.000", localtime (&now));
-        fprintf(stdout, "%s %s", buff, clientMessage);
+        unsigned long long ts = getTimeStamp();
+
+        timeString = getTimeString(now);
+
+        fprintf(stdout, "%s %s %s", remoteAddress, timeString, clientMessage);
+
+        const char **strArray = getSplitString(clientMessage);
+        char *requestType = strArray[0];
+        char *fileName = strArray[1];
+        int status;
+
+        int arrLen = -1;
+        while (strArray[++arrLen] != NULL) { }
+
+        if (arrLen != 3){
+            status = 501;
+        }       
+
+
+        if(fileName[0] == '~')
+        {
+            char temp[BUF_LEN];
+            sprintf(temp, "/Users/%s/myhttpd/%s" , getUserName(), strcpy(fileName, fileName+1));
+            // fileName = temp;
+            fileName = temp;
+            fprintf(stderr, "%s\n", fileName);
+        }
+
+        int fileSize=0;
+
+        if(isFileThere(fileName) == false)
+        {
+            status = 404;
+        }
+        else
+        {
+            fileSize = getFileSize(fileName);
+            fprintf(stderr, "%d\n", fileSize);
+            if(fileSize == -2)
+            {
+                char temp[BUF_LEN];
+                sprintf(temp, "%s/index.html", fileName);
+                fileName = temp;
+                if(isFileThere(fileName) == false)
+                {
+                    fileSize = 0;
+                    status = 404;
+                }
+                else
+                {
+                    fileSize = getFileSize(fileName);
+                    status = 200;
+                }
+            }
+            else
+            {
+                status = 200;
+            }
+        }
+
+        fprintf(stderr, "reached\n");
+
+        if(strcmp(requestType,"HEAD") == 0){
+            fileSize = 0;
+        }
+        
+        pthread_mutex_lock(&requests_access_lock);
+        requests[requestsCount].ts = ts;
+        requests[requestsCount].timeString = timeString;
+        requests[requestsCount].remoteAddress = remoteAddress;
+        requests[requestsCount].status = status;
+        requests[requestsCount].sock = sock;
+        requests[requestsCount].fileName = fileName;
+        requests[requestsCount].fileSize = fileSize;
+        requests[requestsCount].requestType = requestType;
+        fprintf(stderr, "ts = %llu \ntimeString = %s \nremoteAddress = %s \nstatus = %d \nsock = %d \nfileName = %s \nfileSize = %d \nrequestType = %s \n", 
+            requests[requestsCount].ts,
+            requests[requestsCount].timeString,
+            requests[requestsCount].remoteAddress,
+            requests[requestsCount].status,
+            requests[requestsCount].sock,
+            requests[requestsCount].fileName,
+            requests[requestsCount].fileSize,
+            requests[requestsCount].requestType);
+        requestsCount++;
+        pthread_mutex_unlock(&requests_access_lock);
+
+        
         if(logFile != NULL){
             pthread_mutex_lock(&log_lock);
             // fprintf(stderr, "%s %d\n", log_file, logFile);
-            fprintf(logFile, "%s %s", buff, clientMessage);
+            fprintf(logFile, "%s -  %s %s", remoteAddress, buff, clientMessage);
             fflush(logFile);
             pthread_mutex_unlock(&log_lock);
         }
@@ -500,3 +611,61 @@ isFileThere(const char *fname)
         return false;
     }
 } 
+
+const char 
+*getTimeString(time_t ts){
+    static char timeString[100];
+    strftime (timeString, 100, "%d/%b/%Y:%H:%M:%S -0600", localtime (&ts));
+    return timeString;
+}
+
+unsigned long long
+getTimeStamp(){
+    struct timeval tv;
+
+    gettimeofday(&tv, NULL);
+
+    unsigned long long millisecondsSinceEpoch =
+        (unsigned long long)(tv.tv_sec) * 1000 +
+        (unsigned long long)(tv.tv_usec) / 1000;
+
+    return millisecondsSinceEpoch;
+}
+
+const char
+**getSplitString(const char *mainString){
+    char ** res  = NULL;
+    char *  p    = strtok (mainString, " ");
+    int n_spaces = 0, i;
+
+
+    /* split string and append tokens to 'res' */
+
+    while (p) {
+      res = realloc (res, sizeof (char*) * ++n_spaces);
+
+      if (res == NULL)
+        exit (-1); /* memory allocation failed */
+
+      res[n_spaces-1] = p;
+
+      p = strtok (NULL, " ");
+    }
+
+    /* realloc one extra element for the last NULL */
+
+    res = realloc (res, sizeof (char*) * (n_spaces+1));
+    res[n_spaces] = NULL;
+    res[n_spaces-1][strlen(res[n_spaces-1])-1] = '\0';
+
+    /* print the result */
+
+    for (i = 0; i < (n_spaces); ++i)
+      printf ("res[%d] = %s\n", i, res[i]);
+
+    /* free the memory allocated */
+
+    free (res);
+
+    return res;
+}
