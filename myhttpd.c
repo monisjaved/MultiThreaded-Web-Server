@@ -1,14 +1,8 @@
-/*
- * soc.c - program to open sockets to remote machines
- *
- * $Author: kensmith $
- * $Id: soc.c 6 2009-07-03 03:18:54Z kensmith $
- */
-
-static char svnid[] = "$Id: soc.c 6 2009-07-03 03:18:54Z kensmith $";
-
 #define BUF_LEN 8192
 
+#define SERVER "MYHTTPD"
+
+// creating boolean for easier usage
 typedef int bool;
 #define true 1
 #define false 0
@@ -35,12 +29,6 @@ typedef int bool;
 char *progname;
 char buf[BUF_LEN];
 
-struct header {
-    uint32_t len;
-    unsigned char type;
-    char name[100];
-};
-
 struct Entry
 {
     unsigned long long ts;
@@ -54,7 +42,8 @@ struct Entry
 
 } requests[1000], available;
 
-struct arg_struct {
+struct arg_struct 
+{
     int sock;
     char *remoteAddress;
 };
@@ -63,14 +52,16 @@ void usage();
 int setup_client();
 int setup_server();
 int getFileSize(const char *);
+const char *getFileLastModifiedTime(const char *);
 int comparator(const void *, const void *);
 const char *getUserName();
-bool isFileThere(const char *fname);
 void *listener(void *);
 void *queuer(void *);
+void *executor(void *);
 const char *getTimeString(time_t);
 unsigned long long getTimeStamp();
 const char ** getSplitString(const char *);
+int sendFile(int, const char *);
 
 
 
@@ -102,7 +93,6 @@ int
 main(int argc,char *argv[])
 {
     username = getUserName();
-    fd_set ready;
 
     // default initializations
     port = "8080";
@@ -119,44 +109,24 @@ main(int argc,char *argv[])
     pthread_mutex_init ( &log_lock, NULL);
 
 
-    struct header *fil;
     struct dirent *ent;
 
-    struct sockaddr_in serv, msgfrom, remote;
+    struct sockaddr_in serv, remote;
     struct servent *se;
 
-    int msgsize, len, newsock, i;
-
-    union {
-        uint32_t addr;
-        char bytes[4];
-    } fromaddr;
+    int len, newsock, i;
 
     pthread_t listener_thread, queuer_thread, executor_thread[threadNum];
     available.status = NULL;
 
-    if(pthread_create( &queuer_thread , NULL ,  queuer , NULL) < 0)
-    {
-        perror("could not create queuer thread");
-        exit(1);
-    }
-
-    fprintf(stderr, "reached\n");
-
-    // for(i = 0; i< threadNum; i++){
-    //     if(pthread_create( &executor_thread , NULL ,  executor , NULL) < 0)
-    //     {
-    //         perror("could not create executor thread");
-    //         exit(1);
-    //     }
-    // }
 
     if ((progname = rindex(argv[0], '/')) == NULL)
         progname = argv[0];
     else
         progname++;
     while ((ch = getopt(argc, argv, "dhl:p:r:t:n:s:")) != -1)
-        switch(ch) {
+        switch(ch) 
+        {
             case 'd':
                 isDebug = true; /* print address in output */
                 threadNum = 1;
@@ -202,11 +172,12 @@ main(int argc,char *argv[])
         chdir(dir);
         if (getcwd(cwd, sizeof(cwd)) != NULL)
             fprintf(stdout, "Current working dir: %s\n", cwd);
-        while ((ent = readdir (dir)) != NULL) {
+        while ((ent = readdir (dir)) != NULL) 
+        {
             if(ent->d_name[0] == '.')
                 continue;
             // fil = getFileMeta(ent->d_name);
-            printf ("%s \t %d\n", ent->d_name, getFileSize(ent->d_name));
+            printf ("%s \t %d %s\n", ent->d_name, getFileSize(ent->d_name), getFileLastModifiedTime(ent->d_name));
         }
         closedir (dir);
     }
@@ -218,10 +189,27 @@ main(int argc,char *argv[])
         pthread_mutex_unlock(&log_lock);
     }
 
+    if(pthread_create( &queuer_thread , NULL ,  queuer , NULL) < 0)
+    {
+        perror("could not create queuer thread");
+        exit(1);
+    }
+
+    fprintf(stderr, "reached\n");
+
+    for(i = 0; i< threadNum; i++){
+        if(pthread_create( &executor_thread , NULL ,  executor , NULL) < 0)
+        {
+            perror("could not create executor thread");
+            exit(1);
+        }
+    }
+
 /*
  * Create socket on local host.
  */
-    if ((s = socket(AF_INET, soctype, 0)) < 0) {
+    if ((s = socket(AF_INET, soctype, 0)) < 0) 
+    {
         perror("socket");
         exit(1);
     }
@@ -232,18 +220,22 @@ main(int argc,char *argv[])
         serv.sin_port = htons(0);
     else if (isdigit(*port))
         serv.sin_port = htons(atoi(port));
-    else {
-        if ((se = getservbyname(port, (char *)NULL)) < (struct servent *) 0) {
+    else 
+    {
+        if ((se = getservbyname(port, (char *)NULL)) < (struct servent *) 0) 
+        {
             perror(port);
             exit(1);
         }
         serv.sin_port = se->s_port;
     }
-    if (bind(s, (struct sockaddr *)&serv, sizeof(serv)) < 0) {
+    if (bind(s, (struct sockaddr *)&serv, sizeof(serv)) < 0) 
+    {
         perror("bind");
         exit(1);
     }
-    if (getsockname(s, (struct sockaddr *) &remote, &len) < 0) {
+    if (getsockname(s, (struct sockaddr *) &remote, &len) < 0) 
+    {
         perror("getsockname");
         exit(1);
     }
@@ -264,7 +256,7 @@ main(int argc,char *argv[])
 
         if(pthread_create( &listener_thread , NULL ,  listener , (void*) &arguments) < 0)
         {
-            perror("could not create thread");
+            perror("could not create listener thread");
             exit(1);
         }
     }
@@ -275,50 +267,6 @@ main(int argc,char *argv[])
     }
      
     return 0;
-//  sock = setup_server();
-// /*
-//  * Set up select(2) on both socket and terminal, anything that comes
-//  * in on socket goes to terminal, anything that gets typed on terminal
-//  * goes out socket...
-//  */
-//  while (!done) {
-//      FD_ZERO(&ready);
-//      FD_SET(sock, &ready);
-//      FD_SET(fileno(stdin), &ready);
-//      if (select((sock + 1), &ready, 0, 0, 0) < 0) {
-//          perror("select");
-//          exit(1);
-//      }
-//      if (FD_ISSET(fileno(stdin), &ready)) {
-//          if ((bytes = read(fileno(stdin), buf, BUF_LEN)) <= 0)
-//              done++;
-//          send(sock, buf, bytes, 0);
-//      }
-//      msgsize = sizeof(msgfrom);
-//      if (FD_ISSET(sock, &ready)) {
-//          if ((bytes = recvfrom(sock, buf, BUF_LEN, 0, (struct sockaddr *)&msgfrom, &msgsize)) <= 0) {
-//              done++;
-//          } else if (aflg) {
-//              fromaddr.addr = ntohl(msgfrom.sin_addr.s_addr);
-//              fprintf(stderr, "%d.%d.%d.%d: ", 0xff & (unsigned int)fromaddr.bytes[0],
-//                  0xff & (unsigned int)fromaddr.bytes[1],
-//                  0xff & (unsigned int)fromaddr.bytes[2],
-//                  0xff & (unsigned int)fromaddr.bytes[3]);
-//          }
-//          time_t now = time (0);
-//          strftime (buff, 100, "%Y-%m-%d %H:%M:%S.000", localtime (&now));
-//          fprintf(stdout, "%s %s", buff, buf);
-//          if(logFile != NULL){
-//              pthread_mutex_lock(&log_lock);
-//              // fprintf(stderr, "%s %d\n", log_file, logFile);
-//              fprintf(logFile, "%s %s", buff, buf);
-//              fflush(logFile);
-//              pthread_mutex_unlock(&log_lock);
-//          }
-//          // write(fileno(stdout), buf, bytes);
-//      }
-//  }
-//  return(0);
 }
 
 /*
@@ -332,7 +280,6 @@ void
     int sock = args->sock;
     char *remoteAddress = args->remoteAddress;
     int readLen;
-    int i;
 
     char clientMessage[BUF_LEN];
     const char *timeString;
@@ -351,74 +298,86 @@ void
         fprintf(stdout, "%s %s %s", remoteAddress, timeString, clientMessage);
 
         const char **strArray = getSplitString(clientMessage);
-        char *requestType = strArray[0];
-        char *fileName = strArray[1];
-        int status;
+        int status, fileSize;
+        char *requestType, *fileName;
 
         int arrLen = -1;
         while (strArray[++arrLen] != NULL) { }
 
         if (arrLen != 3){
             status = 501;
+            requestType = malloc(BUF_LEN);
+            strcpy(requestType, "GET");
+            fileSize = -1;  
         }       
 
-
-        if(fileName[0] == '~')
-        {
-            char temp[BUF_LEN];
-            sprintf(temp, "/Users/%s/myhttpd/%s" , getUserName(), strcpy(fileName, fileName+1));
-            // fileName = temp;
-            fileName = temp;
-            fprintf(stderr, "%s\n", fileName);
-        }
-
-        int fileSize=0;
-
-        if(isFileThere(fileName) == false)
-        {
-            status = 404;
-        }
         else
         {
-            fileSize = getFileSize(fileName);
-            fprintf(stderr, "%d\n", fileSize);
-            if(fileSize == -2)
+            requestType = strArray[0];
+            fileName = strArray[1];
+            if(fileName[0] == '~')
             {
                 char temp[BUF_LEN];
-                sprintf(temp, "%s/index.html", fileName);
+                sprintf(temp, "/Users/%s/myhttpd/%s" , getUserName(), strcpy(fileName, fileName+1));
+                // fileName = temp;
                 fileName = temp;
-                if(isFileThere(fileName) == false)
-                {
-                    fileSize = 0;
-                    status = 404;
-                }
-                else
-                {
-                    fileSize = getFileSize(fileName);
-                    status = 200;
-                }
+                fprintf(stderr, "%s\n", fileName);
+            }
+
+            fileSize=0;
+
+            if(getFileSize(fileName) == -1)
+            {
+                status = 404;
             }
             else
             {
-                status = 200;
+                fileSize = getFileSize(fileName);
+                fprintf(stderr, "%d\n", fileSize);
+                if(fileSize == -2)
+                {
+                    char temp[BUF_LEN];
+                    sprintf(temp, "%s/index.html", fileName);
+                    fileName = temp;
+                    if(getFileSize(fileName) == -1)
+                    {
+                        fileSize = 0;
+                        status = 404;
+                    }
+                    else
+                    {
+                        fileSize = getFileSize(fileName);
+                        status = 200;
+                    }
+                }
+                else
+                {
+                    status = 200;
+                }
             }
+
+            fprintf(stderr, "reached\n");
+
+            if(strcmp(requestType,"HEAD") == 0){
+                fileSize = 0;
+            } 
         }
 
-        fprintf(stderr, "reached\n");
-
-        if(strcmp(requestType,"HEAD") == 0){
-            fileSize = 0;
-        }
+        
         
         pthread_mutex_lock(&requests_access_lock);
         requests[requestsCount].ts = ts;
-        requests[requestsCount].timeString = timeString;
-        requests[requestsCount].remoteAddress = remoteAddress;
+        requests[requestsCount].timeString = malloc(BUF_LEN);
+        strcpy(requests[requestsCount].timeString,timeString);
+        requests[requestsCount].remoteAddress = malloc(BUF_LEN);
+        strcpy(requests[requestsCount].remoteAddress,remoteAddress);
         requests[requestsCount].status = status;
         requests[requestsCount].sock = sock;
-        requests[requestsCount].fileName = fileName;
+        requests[requestsCount].fileName = malloc(BUF_LEN);
+        strcpy(requests[requestsCount].fileName,fileName);
         requests[requestsCount].fileSize = fileSize;
-        requests[requestsCount].requestType = requestType;
+        requests[requestsCount].requestType = malloc(BUF_LEN);
+        strcpy(requests[requestsCount].requestType,requestType);
         fprintf(stderr, "ts = %llu \ntimeString = %s \nremoteAddress = %s \nstatus = %d \nsock = %d \nfileName = %s \nfileSize = %d \nrequestType = %s \n", 
             requests[requestsCount].ts,
             requests[requestsCount].timeString,
@@ -458,116 +417,108 @@ void
 }
 
 void
-*queuer(void *arguments) {
+*queuer(void *arguments) 
+{
     fprintf(stderr, "reached queuer\n");
+    bool sleeping = false;
     while(true)
     {
         pthread_mutex_lock(&requests_access_lock);
-        if(requestsCount > 0)
-            qsort((void*)requests, requestsCount, sizeof(requests[0]), comparator);
         pthread_mutex_lock(&available_access_lock);
-        if(available.status != NULL)
+        if(available.status == NULL && requestsCount > 0)
         {
+            qsort((void*)requests, requestsCount, sizeof(requests[0]), comparator);
             available = requests[requestsCount-1];
             requestsCount--;
+            // fprintf(stderr, "%d\n", requestsCount);
+        }
+        else{
+            sleeping = true;
         }
         pthread_mutex_unlock(&available_access_lock);
         pthread_mutex_unlock(&requests_access_lock);
-        sleep(5);
-        for(int i=0;i<requestsCount;i++){
-            fprintf(stderr, "%d - ", requests[i].fileSize);
+        if(sleeping)
+        {
+            sleep(5);
+            for(int i=0;i<requestsCount;i++){
+                fprintf(stderr, "%d[%s|%s] - ", requests[i].fileSize, requests[i].fileName, requests[i].requestType);
+            }
+            fprintf(stderr, "\n");
         }
-        fprintf(stderr, "\n");
     }
     return 0;
 }
 
-int
-setup_client() {
-
-    struct hostent *hp, *gethostbyname();
-    struct sockaddr_in serv;
-    struct servent *se;
-
-/*
- * Look up name of remote machine, getting its address.
- */
-    if ((hp = gethostbyname(host)) == NULL) {
-        fprintf(stderr, "%s: %s unknown host\n", progname, host);
-        exit(1);
-    }
-/*
- * Set up the information needed for the socket to be bound to a socket on
- * a remote host.  Needs address family to use, the address of the remote
- * host (obtained above), and the port on the remote host to connect to.
- */
-    serv.sin_family = AF_INET;
-    memcpy(&serv.sin_addr, hp->h_addr, hp->h_length);
-    if (isdigit(*port))
-        serv.sin_port = htons(atoi(port));
-    else {
-        if ((se = getservbyname(port, (char *)NULL)) < (struct servent *) 0) {
-            perror(port);
-            exit(1);
+void
+*executor(void *arguments)
+{
+    // int *sleepTime = (int *)arguments;
+    fprintf(stderr, "sleeping for %d\n", sleepTime);
+    sleep(sleepTime);
+    // fprintf(stderr, "awake\n");
+    while(true)
+    {
+        pthread_mutex_lock(&available_access_lock);
+        struct Entry elem = available;
+        available.status = NULL;
+        pthread_mutex_unlock(&available_access_lock);
+        if(elem.status == NULL)
+        {
+            continue;
         }
-        serv.sin_port = se->s_port;
-    }
-/*
- * Try to connect the sockets...
- */
-    if (connect(s, (struct sockaddr *) &serv, sizeof(serv)) < 0) {
-        perror("connect");
-        exit(1);
-    } else
-        fprintf(stderr, "Connected...\n");
-    return(s);
-}
 
-/*
- * setup_server() - set up socket for mode of soc running as a server.
- */
+        int status = elem.status;
 
-int
-setup_server() {
-    struct sockaddr_in serv, remote;
-    struct servent *se;
-    int newsock, len;
+        const char *lastModifiedTime = NULL;
 
-    len = sizeof(remote);
-    memset((void *)&serv, 0, sizeof(serv));
-    serv.sin_family = AF_INET;
-    if (port == NULL)
-        serv.sin_port = htons(0);
-    else if (isdigit(*port))
-        serv.sin_port = htons(atoi(port));
-    else {
-        if ((se = getservbyname(port, (char *)NULL)) < (struct servent *) 0) {
-            perror(port);
-            exit(1);
+        if(status != 501 && status != 404)
+            lastModifiedTime = getFileLastModifiedTime(elem.fileName);
+        
+        time_t now = time(0);
+        const char *execRecievedTime = getTimeString(now);
+
+        char fileType[BUF_LEN];
+
+
+        if(status == 501)
+        {
+            strcpy(fileType, "INVALID REQUEST");
+        } 
+        else if(status == 404)
+        {
+            strcpy(fileType, "FILE NOT FOUND");
         }
-        serv.sin_port = se->s_port;
+        else if(strstr(elem.fileName, ".jpg") != NULL || strstr(elem.fileName, ".jpeg") != NULL || strstr(elem.fileName, ".png") != NULL || strstr(elem.fileName, ".gif") != NULL)
+        {
+            strcpy(fileType, "image/gif");
+        }
+        else
+        {
+            strcpy(fileType, "text/html");
+        }
+
+        char retString[BUF_LEN];
+
+        sprintf(retString, "Date: %s \nServer: %s \nLast-Modified: %s \nContent-Type: %s \nContent-Length: %d\n\n", execRecievedTime, SERVER, getFileLastModifiedTime(elem.fileName), fileType, elem.fileSize);
+        send(elem.sock, retString, strlen(retString), 0);
+
+        if(status == 200 && strcmp(elem.requestType, "GET") == 0)
+        {
+            sendFile(elem.sock, elem.fileName);
+        }
+
+        fprintf(stderr, "------executor------\nts = %llu \ntimeString = %s \nremoteAddress = %s \nstatus = %d \nsock = %d \nfileName = %s \nfileSize = %d \nrequestType = %s \n-------------------\n", 
+            elem.ts,
+            elem.timeString,
+            elem.remoteAddress,
+            elem.status,
+            elem.sock,
+            elem.fileName,
+            elem.fileSize,
+            elem.requestType);
     }
-    if (bind(s, (struct sockaddr *)&serv, sizeof(serv)) < 0) {
-        perror("bind");
-        exit(1);
-    }
-    if (getsockname(s, (struct sockaddr *) &remote, &len) < 0) {
-        perror("getsockname");
-        exit(1);
-    }
-    fprintf(stderr, "Port number is %d\n", ntohs(remote.sin_port));
-    listen(s, 1);
-    newsock = s;
-    if (soctype == SOCK_STREAM) {
-        fprintf(stderr, "Entering accept() waiting for connection.\n");
-        newsock = accept(s, (struct sockaddr *) &remote, &len);
-        fprintf(stderr, "Connection recieved from %d.%d.%d.%d\n",
-              remote.sin_addr.s_addr&0xFF,
-              (remote.sin_addr.s_addr&0xFF00)>>8,
-              (remote.sin_addr.s_addr&0xFF0000)>>16,
-              (remote.sin_addr.s_addr&0xFF000000)>>24);
-    }
-    return(newsock);
+    
+    return 0;
 }
 
 /*
@@ -595,25 +546,55 @@ getFileSize(const char *filename) // path to file
     {
         chdir(dir);
         sprintf(fullpath, "%s/%s", directory, filename);
-        fprintf(stderr, "%s\n", fullpath);
+        // fprintf(stderr, "%s\n", fullpath);
         status = stat (fullpath, &st_buf);
-        if (status != 0) {
+        if (status != 0) 
+        {
             printf ("Error, errno = %s ", strerror(errno));
-            return 1;
+            return -1;
         }
 
-        if (S_ISREG (st_buf.st_mode)) {
-            FILE *p_file = NULL;
-            p_file = fopen(fullpath, "r");
-            fseek(p_file,0,SEEK_END);
-            size = ftell(p_file);
-            fclose(p_file);
+        if (S_ISREG (st_buf.st_mode)) 
+        {
+            // FILE *p_file = NULL;
+            // p_file = fopen(fullpath, "r");
+            // fseek(p_file,0,SEEK_END);
+            // size = ftell(p_file);
+            // fclose(p_file);
+            return st_buf.st_size;
         }
-        if (S_ISDIR (st_buf.st_mode)) {
+        if (S_ISDIR (st_buf.st_mode)) 
+        {
             return -2;
         }
     }
     return size;
+}
+
+const char 
+*getFileLastModifiedTime(const char *filename) // path to file
+{
+    DIR* dir = opendir(directory);
+    int size = -1;
+    struct stat st_buf;
+    int status;
+    char *fullpath = malloc(strlen(directory) + strlen(filename) + 2);
+
+    if (dir)
+    {
+        chdir(dir);
+        sprintf(fullpath, "%s/%s", directory, filename);
+        fprintf(stderr, "%s\n", fullpath);
+        status = stat (fullpath, &st_buf);
+        if(status != 0)
+        {
+            return NULL;
+        }
+
+        return getTimeString(st_buf.st_mtime);
+    }
+    return "not present";
+    // return size;
 }
 
 int 
@@ -644,20 +625,10 @@ getUserName()
   return "";
 }
 
-bool
-isFileThere(const char *fname)
-{
-    if( access( fname, F_OK ) != -1 ) {
-        return true;
-    } else {
-        return false;
-    }
-} 
-
 const char 
 *getTimeString(time_t ts){
     static char timeString[100];
-    strftime (timeString, 100, "%d/%b/%Y:%H:%M:%S -0400", localtime (&ts));
+    strftime (timeString, 100, "%d/%b/%Y:%H:%M:%S", gmtime (&ts));
     return timeString;
 }
 
@@ -678,12 +649,13 @@ const char
 **getSplitString(const char *mainString){
     char ** res  = NULL;
     char *  p    = strtok (mainString, " ");
-    int n_spaces = 0, i;
+    int n_spaces = 0;
 
 
     /* split string and append tokens to 'res' */
 
-    while (p) {
+    while (p) 
+    {
       res = realloc (res, sizeof (char*) * ++n_spaces);
 
       if (res == NULL)
@@ -711,3 +683,52 @@ const char
 
     return res;
 }
+
+int
+sendFile(int sock, const char *fileName)
+{
+    DIR* dir = opendir(directory);
+    int size = -1;
+    struct stat st_buf;
+    int status;
+    char *fullpath = malloc(strlen(directory) + strlen(fileName) + 2);
+
+    if (dir)
+    {
+        chdir(dir);
+        sprintf(fullpath, "%s/%s", directory, fileName);
+        fprintf(stderr, "%s\n", fullpath);
+        status = stat (fullpath, &st_buf);
+        if(status != 0)
+        {
+            return NULL;
+        }
+
+        char buffer[BUF_LEN];
+
+        FILE *fs=fopen(fullpath,"r");
+        if(fs==NULL)
+        {
+            perror("\n[Server] File is not found on Server Directory");
+            return -1;
+        }
+
+        bzero(buffer, BUF_LEN); 
+        int bytes_written;
+        int total_bytes_written; 
+
+        while((bytes_written = fread(buffer, sizeof(char), BUF_LEN, fs))>0)
+        {
+            if(send(sock, buffer, bytes_written, 0) < 0)
+            {
+                puts("\n[Server] Error: Sending File Failed");
+                return -1;
+            }
+            total_bytes_written += bytes_written;
+            bzero(buffer, BUF_LEN);
+        }
+        return total_bytes_written;
+    }
+    return -1;
+}
+

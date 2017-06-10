@@ -123,7 +123,7 @@ main(int argc,char *argv[])
 			}
 			time_t now = time (0);
 			strftime (buff, 100, "%Y-%m-%d %H:%M:%S.000", localtime (&now));
-			fprintf(stdout, "%s %s", buff, buf);
+			fprintf(stdout, "%s", buf);
 			// write(fileno(stdout), buf, bytes);
 		}
 	}
