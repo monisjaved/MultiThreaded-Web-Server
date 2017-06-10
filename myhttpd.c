@@ -39,6 +39,7 @@ struct Entry
     long fileSize;
     int sock;
     int status;
+    char *quotedFirstLine
 
 } requests[1000], available;
 
@@ -162,7 +163,7 @@ main(int argc,char *argv[])
         }
 
     if(isdigit(*port))
-        fprintf(stderr, "%d %d %d %d %d\n", argc, server, host, htons(atoi(port)), optind);
+        // fprintf(stderr, "%d %d %d %d %d\n", argc, server, host, htons(atoi(port)), optind);
     argc -= optind;
 
     DIR* dir = opendir(directory);
@@ -171,13 +172,13 @@ main(int argc,char *argv[])
         /* Directory exists. */
         chdir(dir);
         if (getcwd(cwd, sizeof(cwd)) != NULL)
-            fprintf(stdout, "Current working dir: %s\n", cwd);
+            // fprintf(stdout, "Current working dir: %s\n", cwd);
         while ((ent = readdir (dir)) != NULL) 
         {
             if(ent->d_name[0] == '.')
                 continue;
             // fil = getFileMeta(ent->d_name);
-            printf ("%s \t %d %s\n", ent->d_name, getFileSize(ent->d_name), getFileLastModifiedTime(ent->d_name));
+            // printf ("%s \t %d %s\n", ent->d_name, getFileSize(ent->d_name), getFileLastModifiedTime(ent->d_name));
         }
         closedir (dir);
     }
@@ -195,7 +196,7 @@ main(int argc,char *argv[])
         exit(1);
     }
 
-    fprintf(stderr, "reached\n");
+    // fprintf(stderr, "reached\n");
 
     for(i = 0; i< threadNum; i++){
         if(pthread_create( &executor_thread , NULL ,  executor , NULL) < 0)
@@ -289,13 +290,17 @@ void
         //end of string marker
 
         clientMessage[readLen] = '\0';
+        char temp[BUF_LEN];
+
+        strcpy(temp, clientMessage);
+        temp[strlen(temp)-1] = '\0';
 
         time_t now = time (0);
         unsigned long long ts = getTimeStamp();
 
         timeString = getTimeString(now);
 
-        fprintf(stdout, "%s %s %s", remoteAddress, timeString, clientMessage);
+        // fprintf(stdout, "%s %s %s", remoteAddress, timeString, clientMessage);
 
         const char **strArray = getSplitString(clientMessage);
         int status, fileSize;
@@ -321,7 +326,7 @@ void
                 sprintf(temp, "/Users/%s/myhttpd/%s" , getUserName(), strcpy(fileName, fileName+1));
                 // fileName = temp;
                 fileName = temp;
-                fprintf(stderr, "%s\n", fileName);
+                // fprintf(stderr, "%s\n", fileName);
             }
 
             fileSize=0;
@@ -333,7 +338,7 @@ void
             else
             {
                 fileSize = getFileSize(fileName);
-                fprintf(stderr, "%d\n", fileSize);
+                // fprintf(stderr, "%d\n", fileSize);
                 if(fileSize == -2)
                 {
                     char temp[BUF_LEN];
@@ -356,7 +361,7 @@ void
                 }
             }
 
-            fprintf(stderr, "reached\n");
+            // fprintf(stderr, "reached\n");
 
             if(strcmp(requestType,"HEAD") == 0){
                 fileSize = 0;
@@ -378,26 +383,28 @@ void
         requests[requestsCount].fileSize = fileSize;
         requests[requestsCount].requestType = malloc(BUF_LEN);
         strcpy(requests[requestsCount].requestType,requestType);
-        fprintf(stderr, "ts = %llu \ntimeString = %s \nremoteAddress = %s \nstatus = %d \nsock = %d \nfileName = %s \nfileSize = %d \nrequestType = %s \n", 
-            requests[requestsCount].ts,
-            requests[requestsCount].timeString,
-            requests[requestsCount].remoteAddress,
-            requests[requestsCount].status,
-            requests[requestsCount].sock,
-            requests[requestsCount].fileName,
-            requests[requestsCount].fileSize,
-            requests[requestsCount].requestType);
+        requests[requestsCount].quotedFirstLine = malloc(BUF_LEN);
+        strcpy(requests[requestsCount].quotedFirstLine, temp);
+        // fprintf(stderr, "ts = %llu \ntimeString = %s \nremoteAddress = %s \nstatus = %d \nsock = %d \nfileName = %s \nfileSize = %d \nrequestType = %s \n", 
+        //     requests[requestsCount].ts,
+        //     requests[requestsCount].timeString,
+        //     requests[requestsCount].remoteAddress,
+        //     requests[requestsCount].status,
+        //     requests[requestsCount].sock,
+        //     requests[requestsCount].fileName,
+        //     requests[requestsCount].fileSize,
+        //     requests[requestsCount].requestType);
         requestsCount++;
         pthread_mutex_unlock(&requests_access_lock);
 
         
-        if(logFile != NULL){
-            pthread_mutex_lock(&log_lock);
-            // fprintf(stderr, "%s %d\n", log_file, logFile);
-            fprintf(logFile, "%s -  %s %s", remoteAddress, buff, clientMessage);
-            fflush(logFile);
-            pthread_mutex_unlock(&log_lock);
-        }
+        // if(logFile != NULL){
+        //     pthread_mutex_lock(&log_lock);
+        //     // fprintf(stderr, "%s %d\n", log_file, logFile);
+        //     fprintf(logFile, "%s -  %s %s", remoteAddress, buff, clientMessage);
+        //     fflush(logFile);
+        //     pthread_mutex_unlock(&log_lock);
+        // }
         
         //clear the message buffer
         memset(clientMessage, 0, BUF_LEN);
@@ -405,8 +412,8 @@ void
      
     if(readLen == 0)
     {
-        puts("Client disconnected");
-        fflush(stdout);
+        // puts("Client disconnected");
+        // fflush(stdout);
     }
     else if(readLen == -1)
     {
@@ -419,7 +426,7 @@ void
 void
 *queuer(void *arguments) 
 {
-    fprintf(stderr, "reached queuer\n");
+    // fprintf(stderr, "reached queuer\n");
     bool sleeping = false;
     while(true)
     {
@@ -429,6 +436,9 @@ void
         {
             qsort((void*)requests, requestsCount, sizeof(requests[0]), comparator);
             available = requests[requestsCount-1];
+            time_t now = time(0);
+            available.timeString = malloc(BUF_LEN);
+            available.timeString = getTimeString(now);
             requestsCount--;
             // fprintf(stderr, "%d\n", requestsCount);
         }
@@ -439,11 +449,11 @@ void
         pthread_mutex_unlock(&requests_access_lock);
         if(sleeping)
         {
-            sleep(5);
-            for(int i=0;i<requestsCount;i++){
-                fprintf(stderr, "%d[%s|%s] - ", requests[i].fileSize, requests[i].fileName, requests[i].requestType);
-            }
-            fprintf(stderr, "\n");
+            sleep(2);
+            // for(int i=0;i<requestsCount;i++){
+            //     fprintf(stderr, "%d[%s|%s] - ", requests[i].fileSize, requests[i].fileName, requests[i].requestType);
+            // }
+            // fprintf(stderr, "\n");
         }
     }
     return 0;
@@ -453,7 +463,7 @@ void
 *executor(void *arguments)
 {
     // int *sleepTime = (int *)arguments;
-    fprintf(stderr, "sleeping for %d\n", sleepTime);
+    // fprintf(stderr, "sleeping for %d\n", sleepTime);
     sleep(sleepTime);
     // fprintf(stderr, "awake\n");
     while(true)
@@ -471,8 +481,8 @@ void
 
         const char *lastModifiedTime = NULL;
 
-        if(status != 501 && status != 404)
-            lastModifiedTime = getFileLastModifiedTime(elem.fileName);
+        // if(status != 501 && status != 404)
+        //     lastModifiedTime = getFileLastModifiedTime(elem.fileName);
         
         time_t now = time(0);
         const char *execRecievedTime = getTimeString(now);
@@ -499,6 +509,9 @@ void
 
         char retString[BUF_LEN];
 
+        // if(status != 501 && status != 404)
+        //     lastModifiedTime = getFileLastModifiedTime(elem.fileName);
+
         sprintf(retString, "Date: %s \nServer: %s \nLast-Modified: %s \nContent-Type: %s \nContent-Length: %d\n\n", execRecievedTime, SERVER, getFileLastModifiedTime(elem.fileName), fileType, elem.fileSize);
         send(elem.sock, retString, strlen(retString), 0);
 
@@ -507,15 +520,31 @@ void
             sendFile(elem.sock, elem.fileName);
         }
 
-        fprintf(stderr, "------executor------\nts = %llu \ntimeString = %s \nremoteAddress = %s \nstatus = %d \nsock = %d \nfileName = %s \nfileSize = %d \nrequestType = %s \n-------------------\n", 
-            elem.ts,
-            elem.timeString,
-            elem.remoteAddress,
-            elem.status,
-            elem.sock,
-            elem.fileName,
-            elem.fileSize,
-            elem.requestType);
+        // fprintf(stderr, "------executor------\nts = %llu \ntimeString = %s \nremoteAddress = %s \nstatus = %d \nsock = %d \nfileName = %s \nfileSize = %d \nrequestType = %s \n-------------------\n", 
+        //     elem.ts,
+        //     elem.timeString,
+        //     elem.remoteAddress,
+        //     elem.status,
+        //     elem.sock,
+        //     elem.fileName,
+        //     elem.fileSize,
+        //     elem.requestType);
+
+        char logMessage[BUF_LEN];
+        sprintf(logMessage, "%s - [%s] [%s] \"%s\" %d %d", elem.remoteAddress, elem.timeString, execRecievedTime, elem.quotedFirstLine, elem.status, elem.fileSize);
+        if(isDebug)
+        {
+            pthread_mutex_lock(&log_lock);
+            fprintf(stderr, "%s\n", logMessage);
+            pthread_mutex_unlock(&log_lock);
+        }
+        if(log_file != NULL)
+        {
+            pthread_mutex_lock(&log_lock);
+            fprintf(logFile, "%s\n", logMessage);
+            fflush(logFile);
+            pthread_mutex_unlock(&log_lock);
+        }
     }
     
     return 0;
@@ -584,7 +613,7 @@ const char
     {
         chdir(dir);
         sprintf(fullpath, "%s/%s", directory, filename);
-        fprintf(stderr, "%s\n", fullpath);
+        // fprintf(stderr, "%s\n", fullpath);
         status = stat (fullpath, &st_buf);
         if(status != 0)
         {
@@ -697,7 +726,7 @@ sendFile(int sock, const char *fileName)
     {
         chdir(dir);
         sprintf(fullpath, "%s/%s", directory, fileName);
-        fprintf(stderr, "%s\n", fullpath);
+        // fprintf(stderr, "%s\n", fullpath);
         status = stat (fullpath, &st_buf);
         if(status != 0)
         {
