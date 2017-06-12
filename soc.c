@@ -112,7 +112,7 @@ main(int argc,char *argv[])
 		}
 		msgsize = sizeof(msgfrom);
 		if (FD_ISSET(sock, &ready)) {
-			if ((bytes = recvfrom(sock, buf, BUF_LEN, 0, (struct sockaddr *)&msgfrom, &msgsize)) <= 0) {
+			if ((bytes = recv(sock, buf, BUF_LEN, 0)) <= 0) { //(struct sockaddr *)&msgfrom, &msgsize)) <= 0) {
 				done++;
 			} else if (aflg) {
 				fromaddr.addr = ntohl(msgfrom.sin_addr.s_addr);

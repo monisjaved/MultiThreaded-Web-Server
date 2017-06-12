@@ -63,6 +63,7 @@ const char *getTimeString(time_t);
 unsigned long long getTimeStamp();
 const char ** getSplitString(const char *);
 int sendFile(int, const char *);
+bool sendData(int, const char *);
 
 
 
@@ -166,22 +167,22 @@ main(int argc,char *argv[])
         // fprintf(stderr, "%d %d %d %d %d\n", argc, server, host, htons(atoi(port)), optind);
     argc -= optind;
 
-    DIR* dir = opendir(directory);
-    if (dir)
-    {
-        /* Directory exists. */
-        chdir(dir);
-        if (getcwd(cwd, sizeof(cwd)) != NULL)
-            // fprintf(stdout, "Current working dir: %s\n", cwd);
-        while ((ent = readdir (dir)) != NULL) 
-        {
-            if(ent->d_name[0] == '.')
-                continue;
-            // fil = getFileMeta(ent->d_name);
-            // printf ("%s \t %d %s\n", ent->d_name, getFileSize(ent->d_name), getFileLastModifiedTime(ent->d_name));
-        }
-        closedir (dir);
-    }
+    // DIR* dir = opendir(directory);
+    // if (dir)
+    // {
+    //     /* Directory exists. */
+    //     chdir(dir);
+    //     if (getcwd(cwd, sizeof(cwd)) != NULL)
+    //         // fprintf(stdout, "Current working dir: %s\n", cwd);
+    //     while ((ent = readdir (dir)) != NULL) 
+    //     {
+    //         if(ent->d_name[0] == '.')
+    //             continue;
+    //         // fil = getFileMeta(ent->d_name);
+    //         // printf ("%s \t %d %s\n", ent->d_name, getFileSize(ent->d_name), getFileLastModifiedTime(ent->d_name));
+    //     }
+    //     closedir (dir);
+    // }
 
     if(log_file)
     {
@@ -283,7 +284,6 @@ void
     int readLen;
 
     char clientMessage[BUF_LEN];
-    const char *timeString;
      
     while( (readLen = recv(sock , clientMessage , BUF_LEN , 0)) > 0 )
     {
@@ -298,7 +298,9 @@ void
         time_t now = time (0);
         unsigned long long ts = getTimeStamp();
 
-        timeString = getTimeString(now);
+        // char timeString[BUF_LEN];
+
+        // strcpy(timeString, getTimeString(now));
 
         // fprintf(stdout, "%s %s %s", remoteAddress, timeString, clientMessage);
 
@@ -346,8 +348,11 @@ void
                     fileName = temp;
                     if(getFileSize(fileName) == -1)
                     {
+                        char temp[BUF_LEN];
+                        strncpy(temp, fileName, strlen(fileName)-11);
+                        fileName = temp;
                         fileSize = 0;
-                        status = 404;
+                        status = 403;
                     }
                     else
                     {
@@ -373,7 +378,7 @@ void
         pthread_mutex_lock(&requests_access_lock);
         requests[requestsCount].ts = ts;
         requests[requestsCount].timeString = malloc(BUF_LEN);
-        strcpy(requests[requestsCount].timeString,timeString);
+        strcpy(requests[requestsCount].timeString,getTimeString(now));
         requests[requestsCount].remoteAddress = malloc(BUF_LEN);
         strcpy(requests[requestsCount].remoteAddress,remoteAddress);
         requests[requestsCount].status = status;
@@ -438,7 +443,7 @@ void
             available = requests[requestsCount-1];
             time_t now = time(0);
             available.timeString = malloc(BUF_LEN);
-            available.timeString = getTimeString(now);
+            strcpy(available.timeString,getTimeString(now));
             requestsCount--;
             // fprintf(stderr, "%d\n", requestsCount);
         }
@@ -485,7 +490,8 @@ void
         //     lastModifiedTime = getFileLastModifiedTime(elem.fileName);
         
         time_t now = time(0);
-        const char *execRecievedTime = getTimeString(now);
+        char execRecievedTime[BUF_LEN];
+        strcpy(execRecievedTime, getTimeString(now));
 
         char fileType[BUF_LEN];
 
@@ -494,9 +500,9 @@ void
         {
             strcpy(fileType, "INVALID REQUEST");
         } 
-        else if(status == 404)
+        else if(status == 403)
         {
-            strcpy(fileType, "FILE NOT FOUND");
+            strcpy(fileType, "INDEX NOT FOUND IN DIRECTORY");
         }
         else if(strstr(elem.fileName, ".jpg") != NULL || strstr(elem.fileName, ".jpeg") != NULL || strstr(elem.fileName, ".png") != NULL || strstr(elem.fileName, ".gif") != NULL)
         {
@@ -518,6 +524,39 @@ void
         if(status == 200 && strcmp(elem.requestType, "GET") == 0)
         {
             sendFile(elem.sock, elem.fileName);
+        }
+        else if(status == 403)
+        {
+            char *ret = "";
+            DIR* dir = opendir(elem.fileName);
+            struct dirent *ent;
+            if (dir)
+            {
+                /* Directory exists. */
+                chdir(dir);
+                if (getcwd(cwd, sizeof(cwd)) != NULL)
+                    // fprintf(stdout, "Current working dir: %s\n", cwd);
+                    while ((ent = readdir (dir)) != NULL) 
+                    {
+                        char temp[strlen(ret) + 2 + strlen(ent->d_name)];
+                        if(ent->d_name[0] == '.')
+                            continue;
+                        sprintf(temp, "%s\n%s ", ret, ent->d_name);
+                        ret = malloc(strlen(temp));
+                        strcpy(ret, temp);
+                        // free(temp);
+                        // fil = getFileMeta(ent->d_name);
+                        // printf ("%s \t %d %s\n", ent->d_name, getFileSize(ent->d_name), getFileLastModifiedTime(ent->d_name));
+                    }
+                closedir (dir);
+                sendData(elem.sock , ret);
+                ret[strlen(ret)-1] = '\0';
+                // fprintf(stderr, "%s\n", ret);
+            }
+            else
+            {
+                perror("error");
+            }
         }
 
         // fprintf(stderr, "------executor------\nts = %llu \ntimeString = %s \nremoteAddress = %s \nstatus = %d \nsock = %d \nfileName = %s \nfileSize = %d \nrequestType = %s \n-------------------\n", 
@@ -759,5 +798,33 @@ sendFile(int sock, const char *fileName)
         return total_bytes_written;
     }
     return -1;
+}
+
+bool sendData(int sock, const char *data)
+{
+    int dataLength = strlen(data);
+    int leftPacketLength = 0;
+    int offset = 0;
+    int sentPacketLength = 0;
+
+    for(int leftDataLength=dataLength; leftDataLength>0; leftDataLength -= BUF_LEN) {
+
+            leftPacketLength = (leftDataLength > BUF_LEN) ? BUF_LEN : leftDataLength;
+            while(leftPacketLength > 0) {
+                sentPacketLength = send(sock, data + offset, leftPacketLength, 0);
+                if(sentPacketLength < 0) {
+                    fprintf(stderr, "%s: Error while sending data to the socket: %d\n", __func__, sentPacketLength);
+                    perror(errno);
+                    return false;
+                }
+                offset += sentPacketLength;
+                leftPacketLength -= sentPacketLength;
+            }
+        }
+
+        if(offset != dataLength)
+            return false;
+
+        return true;
 }
 
