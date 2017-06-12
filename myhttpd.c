@@ -23,6 +23,7 @@ typedef int bool;
 #include    <unistd.h>
 #include    <errno.h>
 #include    <pwd.h>
+#include    <pthread.h>
 
 
 
@@ -39,7 +40,7 @@ struct Entry
     long fileSize;
     int sock;
     int status;
-    char *quotedFirstLine
+    char *quotedFirstLine;
 
 } requests[1000], available;
 
@@ -116,10 +117,11 @@ main(int argc,char *argv[])
     struct sockaddr_in serv, remote;
     struct servent *se;
 
-    int len, newsock, i;
+    int newsock, i;
+    socklen_t len;
 
     pthread_t listener_thread, queuer_thread, executor_thread[threadNum];
-    available.status = NULL;
+    available.status = -1;
 
 
     if ((progname = rindex(argv[0], '/')) == NULL)
@@ -200,7 +202,7 @@ main(int argc,char *argv[])
     // fprintf(stderr, "reached\n");
 
     for(i = 0; i< threadNum; i++){
-        if(pthread_create( &executor_thread , NULL ,  executor , NULL) < 0)
+        if(pthread_create( &executor_thread[i] , NULL ,  executor , NULL) < 0)
         {
             perror("could not create executor thread");
             exit(1);
@@ -437,7 +439,7 @@ void
     {
         pthread_mutex_lock(&requests_access_lock);
         pthread_mutex_lock(&available_access_lock);
-        if(available.status == NULL && requestsCount > 0)
+        if(available.status == -1 && requestsCount > 0)
         {
             qsort((void*)requests, requestsCount, sizeof(requests[0]), comparator);
             available = requests[requestsCount-1];
@@ -454,7 +456,7 @@ void
         pthread_mutex_unlock(&requests_access_lock);
         if(sleeping)
         {
-            sleep(2);
+            usleep(300 * 1000);
             // for(int i=0;i<requestsCount;i++){
             //     fprintf(stderr, "%d[%s|%s] - ", requests[i].fileSize, requests[i].fileName, requests[i].requestType);
             // }
@@ -475,9 +477,9 @@ void
     {
         pthread_mutex_lock(&available_access_lock);
         struct Entry elem = available;
-        available.status = NULL;
+        available.status = -1;
         pthread_mutex_unlock(&available_access_lock);
-        if(elem.status == NULL)
+        if(elem.status == -1)
         {
             continue;
         }
@@ -504,6 +506,10 @@ void
         {
             strcpy(fileType, "INDEX NOT FOUND IN DIRECTORY");
         }
+        else if(status == 404)
+        {
+            strcpy(fileType, "FILE NOT FOUND");
+        }
         else if(strstr(elem.fileName, ".jpg") != NULL || strstr(elem.fileName, ".jpeg") != NULL || strstr(elem.fileName, ".png") != NULL || strstr(elem.fileName, ".gif") != NULL)
         {
             strcpy(fileType, "image/gif");
@@ -518,7 +524,7 @@ void
         // if(status != 501 && status != 404)
         //     lastModifiedTime = getFileLastModifiedTime(elem.fileName);
 
-        sprintf(retString, "Date: %s \nServer: %s \nLast-Modified: %s \nContent-Type: %s \nContent-Length: %d\n\n", execRecievedTime, SERVER, getFileLastModifiedTime(elem.fileName), fileType, elem.fileSize);
+        sprintf(retString, "Date: %s \nServer: %s \nLast-Modified: %s \nContent-Type: %s \nContent-Length: %ld\n\n", execRecievedTime, SERVER, getFileLastModifiedTime(elem.fileName), fileType, elem.fileSize);
         send(elem.sock, retString, strlen(retString), 0);
 
         if(status == 200 && strcmp(elem.requestType, "GET") == 0)
@@ -570,7 +576,7 @@ void
         //     elem.requestType);
 
         char logMessage[BUF_LEN];
-        sprintf(logMessage, "%s - [%s] [%s] \"%s\" %d %d", elem.remoteAddress, elem.timeString, execRecievedTime, elem.quotedFirstLine, elem.status, elem.fileSize);
+        sprintf(logMessage, "%s - [%s] [%s] \"%s\" %d %ld", elem.remoteAddress, elem.timeString, execRecievedTime, elem.quotedFirstLine, elem.status, elem.fileSize);
         if(isDebug)
         {
             pthread_mutex_lock(&log_lock);
@@ -769,7 +775,7 @@ sendFile(int sock, const char *fileName)
         status = stat (fullpath, &st_buf);
         if(status != 0)
         {
-            return NULL;
+            return -1;
         }
 
         char buffer[BUF_LEN];
