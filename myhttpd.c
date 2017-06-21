@@ -63,7 +63,7 @@ void *executor(void *);
 const char *getTimeString(time_t);
 unsigned long long getTimeStamp();
 const char ** getSplitString(const char *);
-int sendFile(int, const char *);
+int sendFile(int, const char *, const char *);
 bool sendData(int, const char *);
 
 
@@ -510,7 +510,11 @@ void
         {
             strcpy(fileType, "FILE NOT FOUND");
         }
-        else if(strstr(elem.fileName, ".jpg") != NULL || strstr(elem.fileName, ".jpeg") != NULL || strstr(elem.fileName, ".png") != NULL || strstr(elem.fileName, ".gif") != NULL)
+        else if(strstr(elem.fileName, ".jpg") != NULL || strstr(elem.fileName, ".jpeg") != NULL || strstr(elem.fileName, ".png") != NULL)
+        {
+            strcpy(fileType, "image/jpg");
+        }
+        else if(strstr(elem.fileName, ".gif") != NULL)
         {
             strcpy(fileType, "image/gif");
         }
@@ -529,7 +533,7 @@ void
 
         if(status == 200 && strcmp(elem.requestType, "GET") == 0)
         {
-            sendFile(elem.sock, elem.fileName);
+            sendFile(elem.sock, elem.fileName, fileType);
         }
         else if(status == 403)
         {
@@ -759,13 +763,14 @@ const char
 }
 
 int
-sendFile(int sock, const char *fileName)
+sendFile(int sock, const char *fileName, const char *fileType)
 {
     DIR* dir = opendir(directory);
     int size = -1;
     struct stat st_buf;
     int status;
     char *fullpath = malloc(strlen(directory) + strlen(fileName) + 2);
+    FILE *fs;
 
     if (dir)
     {
@@ -780,7 +785,14 @@ sendFile(int sock, const char *fileName)
 
         char buffer[BUF_LEN];
 
-        FILE *fs=fopen(fullpath,"r");
+        if(strcmp(fileType, "text/html") == 0)
+        {
+            fs = fopen(fullpath, "r");            
+        }
+        else
+        {
+            fs = fopen(fullpath, "rb");
+        }
         if(fs==NULL)
         {
             perror("\n[Server] File is not found on Server Directory");
