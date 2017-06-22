@@ -1,0 +1,73 @@
+A. Team Name:
+Team Members:
+    1. Moonis Javed - moonisja - 50208261
+    2.    
+    3. 
+ 
+B. Data Structures Used:
+    1. Queueing and Scheduling
+
+        struct Entry
+        {
+            unsigned long long ts;
+            char *timeString;
+            char *remoteAddress;
+            char *fileName;
+            char *requestType;
+            long fileSize;
+            int sock;
+            int status;
+            char *quotedFirstLine;
+         
+        } requests[1000], available;
+         
+        Where :
+            * Ts = timestamp of the request recieved by listener
+            * timeString = timeString of the request recieved by queuer
+            * remoteAddress = ip string of the client address
+            * fileName = name of the file
+            * fileSize = size of the file
+            * Sock = socket of the client
+            * Status = status of the request [ 200 / 404 / 501 / 403]
+            * quotedFirstLine = request string
+            * requests = array of requests
+            * available = shared variable to assign request
+
+    2. Multithreading 
+
+        pthread_t listener_thread, queuer_thread, executor_thread[threadNum];
+
+
+    3. Synchronization
+
+        pthread_mutex_t requests_access_lock;
+        pthread_mutex_t available_access_lock;
+        pthread_mutex_t log_lock;
+
+
+        Where: 
+            * request_access_lock = lock required to access the array of requests
+            * available_access_lock = lock required to access the shared variable of request
+            * log_lock = lock required to access the log writer
+
+
+C. Context switches happen via the queueing thread which sorts the queue and transfers one element to the shared variable which can be accessed by the executor threads. We are using two different locks for the shared and queue as both are accessed by multiple threads. 
+
+
+D. Race conditions are avoided by implementing the queueing thread which sorts the array based on scheduling algorithm in use [ SJF/ FCFS ] and assigns a single element from the array to a shared variable which can be acquired by any of the threads depending on who acquires the available_access_lock.
+
+E.  
+    1. Advantages
+        1. No race condition
+        2. Memory usage is low
+        3. All execution threads are independent, which makes it deadlock free.
+
+    1. Disadvantages
+        1. Queuer thread has to sort the whole array each time it is assigning a new element to the shared variable.
+
+F. The following resources were used:
+    1. https://stackoverflow.com/questions/11198604/c-split-string-into-an-array-of-strings
+    2. https://stackoverflow.com/questions/30412499/sending-huge-array-through-socket
+    3. https://stackoverflow.com/questions/10446526/get-last-modified-time-of-file-in-linux
+    4. https://stackoverflow.com/questions/8953424/how-to-get-the-username-in-c-c-in-linux
+    5. http://www.geeksforgeeks.org/comparator-function-of-qsort-in-c/
