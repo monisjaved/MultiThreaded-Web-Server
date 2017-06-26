@@ -327,7 +327,7 @@ void
             if(fileName[0] == '~')
             {
                 char temp[BUF_LEN];
-                sprintf(temp, "/Users/%s/myhttpd/%s" , getUserName(), strcpy(fileName, fileName+1));
+                sprintf(temp, "/home/%s/myhttpd/%s" , getUserName(), strcpy(fileName, fileName+1));
                 // fileName = temp;
                 fileName = temp;
                 // fprintf(stderr, "%s\n", fileName);

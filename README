@@ -1,0 +1,8 @@
+Compilation
+
+Run make command to create executable myhttpd
+
+Execution
+
+./myhttpd <arguments>
+eg. ./myhttpd -h
